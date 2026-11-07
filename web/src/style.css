@@ -1,0 +1,60 @@
+:root {
+  --color-bg-base: #f5f7fa;
+  --color-bg-panel: #ffffff;
+  --color-border-subtle: #e4e7ed;
+  --color-text-dim: #909399;
+  --color-text-secondary: #606266;
+  --color-text-primary: #303133;
+  --color-accent: #409eff;
+  --color-success: #67c23a;
+  --color-warning: #e6a23c;
+  --color-danger: #f56c6c;
+  --font-mono: 'SF Mono', 'Menlo', 'Consolas', monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-header__title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.block { margin-top: 16px; }
+
+.mono { font-family: var(--font-mono); }
+
+.text-dim { color: var(--color-text-dim); }
+
+.email-body-preview {
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
