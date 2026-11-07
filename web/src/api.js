@@ -49,6 +49,13 @@ export const sendEmails = (ids, dryRun) =>
     body: JSON.stringify({ ids, dry_run: dryRun }),
   })
 export const getPrompt = () => request('/api/prompt')
+export const importContacts = (content) =>
+  request('/api/contacts/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+export const exportData = () => request('/api/data/export')
 export const savePrompt = (content) =>
   request('/api/prompt', {
     method: 'PUT',
