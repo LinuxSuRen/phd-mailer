@@ -8,6 +8,8 @@ import {
   getConfig,
   updateConfig,
   sendEmails,
+  getPrompt,
+  savePrompt,
 } from './api'
 
 const contacts = ref([])
@@ -25,6 +27,9 @@ const config = reactive({
 })
 const configDialogVisible = ref(false)
 const configForm = reactive({ smtp_user: '', smtp_auth_code: '', interval_seconds: 60 })
+const promptDialogVisible = ref(false)
+const promptContent = ref('')
+const promptSaved = ref('')
 
 const statusText = {
   sent: '已发送',
@@ -126,6 +131,36 @@ async function handleSend() {
   }
 }
 
+async function openPrompt() {
+  try {
+    const data = await getPrompt()
+    promptContent.value = data?.content || ''
+    promptSaved.value = promptContent.value
+    promptDialogVisible.value = true
+  } catch (err) {
+    showError(err)
+  }
+}
+
+async function savePromptContent() {
+  try {
+    await savePrompt(promptContent.value)
+    promptSaved.value = promptContent.value
+    ElMessage.success('提示词已保存')
+  } catch (err) {
+    showError(err)
+  }
+}
+
+async function copyPrompt() {
+  try {
+    await navigator.clipboard.writeText(promptContent.value)
+    ElMessage.success('提示词已复制到剪贴板')
+  } catch {
+    ElMessage.warning('复制失败，请在文本框中手动全选复制')
+  }
+}
+
 onMounted(loadAll)
 </script>
 
@@ -137,6 +172,7 @@ onMounted(loadAll)
         <el-tag :type="config.dry_run ? 'warning' : 'danger'" effect="dark">
           {{ config.dry_run ? '演练模式' : '真实发送' }}
         </el-tag>
+        <el-button @click="openPrompt">AI 提示词</el-button>
         <el-button @click="openConfig">SMTP 配置</el-button>
         <el-button
           type="primary"
@@ -214,6 +250,40 @@ onMounted(loadAll)
       共 {{ contacts.length }} 位导师，已发送
       {{ contacts.filter((c) => c.sent).length }} 位。同一导师（含同一邮箱）永远只会收到一封邮件。
     </p>
+
+    <el-dialog
+      v-model="promptDialogVisible"
+      title="AI 提示词（可编辑，保存后长期生效）"
+      width="720px"
+      top="6vh"
+    >
+      <el-input
+        v-model="promptContent"
+        type="textarea"
+        :rows="20"
+        placeholder="加载中…"
+        style="font-family: var(--font-mono); font-size: 13px"
+      />
+      <p class="text-dim" style="margin: 8px 0 0">
+        拷贝给任意 AI 助手，替换【】中的个人信息，即可批量生成符合 data/emails.yaml 格式的套磁邮件。
+      </p>
+      <template #footer>
+        <el-button
+          v-if="promptContent !== promptSaved"
+          type="warning"
+          size="small"
+          style="float: left"
+          @click="promptContent = promptSaved"
+        >
+          放弃修改
+        </el-button>
+        <el-button @click="promptDialogVisible = false">关闭</el-button>
+        <el-button :disabled="promptContent === promptSaved" @click="savePromptContent">
+          保存
+        </el-button>
+        <el-button type="primary" @click="copyPrompt">复制全文</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="configDialogVisible" title="SMTP 配置（腾讯 QQ 邮箱）" width="480px">
       <el-form label-width="120px">

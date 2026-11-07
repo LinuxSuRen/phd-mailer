@@ -48,3 +48,10 @@ export const sendEmails = (ids, dryRun) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids, dry_run: dryRun }),
   })
+export const getPrompt = () => request('/api/prompt')
+export const savePrompt = (content) =>
+  request('/api/prompt', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })

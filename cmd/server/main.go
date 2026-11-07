@@ -18,6 +18,7 @@ func main() {
 	var (
 		addr    = flag.String("addr", ":8080", "HTTP 监听地址")
 		data    = flag.String("data", "data/emails.yaml", "邮件数据文件路径")
+		prompt  = flag.String("prompt", "docs/ai-prompt.md", "AI 提示词文件路径（控制台可查看与修改）")
 		ledgerP = flag.String("ledger", "data/sent-ledger.json", "发送台账文件路径（去重依据）")
 		dryRun  = flag.Bool("dry-run", true, "试运行模式：默认开启，仅演练不真实发信")
 	)
@@ -27,7 +28,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载发送台账失败：%v", err)
 	}
-	s, err := server.New(*data, l, *dryRun)
+	s, err := server.New(*data, *prompt, l, *dryRun)
 	if err != nil {
 		log.Fatalf("加载数据文件失败：%v", err)
 	}

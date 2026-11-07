@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -58,15 +59,16 @@ type SendResult struct {
 
 // Server 应用状态。
 type Server struct {
-	mu       sync.Mutex
-	dataPath string
-	data     *DataFile
-	ledger   *ledger.Ledger
-	dryRun   bool
+	mu        sync.Mutex
+	dataPath  string
+	promptPath string
+	data      *DataFile
+	ledger    *ledger.Ledger
+	dryRun    bool
 }
 
-// New 加载数据文件并构建服务。
-func New(dataPath string, l *ledger.Ledger, dryRun bool) (*Server, error) {
+// New 加载数据文件并构建服务。promptPath 为 AI 提示词文件路径。
+func New(dataPath, promptPath string, l *ledger.Ledger, dryRun bool) (*Server, error) {
 	raw, err := os.ReadFile(dataPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取数据文件失败：%w", err)
@@ -80,7 +82,7 @@ func New(dataPath string, l *ledger.Ledger, dryRun bool) (*Server, error) {
 	}
 	d.SMTP.User = firstNonEmpty(d.SMTP.User, os.Getenv("PHD_MAILER_SMTP_USER"))
 	d.SMTP.AuthCode = firstNonEmpty(d.SMTP.AuthCode, os.Getenv("PHD_MAILER_SMTP_AUTH_CODE"))
-	return &Server{dataPath: dataPath, data: &d, ledger: l, dryRun: dryRun}, nil
+	return &Server{dataPath: dataPath, promptPath: promptPath, data: &d, ledger: l, dryRun: dryRun}, nil
 }
 
 // Routes 注册全部 API（前缀 /api）。
@@ -89,6 +91,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config", s.handlePutConfig)
 	mux.HandleFunc("POST /api/send", s.handleSend)
+	mux.HandleFunc("GET /api/prompt", s.handleGetPrompt)
+	mux.HandleFunc("PUT /api/prompt", s.handlePutPrompt)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
@@ -248,6 +252,39 @@ func (s *Server) persistLocked() error {
 		return err
 	}
 	return os.WriteFile(s.dataPath, raw, 0o600)
+}
+
+// handleGetPrompt 返回 AI 提示词文件内容（文件不存在时返回空内容）。
+func (s *Server) handleGetPrompt(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	content := ""
+	if raw, err := os.ReadFile(s.promptPath); err == nil {
+		content = string(raw)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"content": content}})
+}
+
+// handlePutPrompt 保存用户修改后的 AI 提示词。
+func (s *Server) handlePutPrompt(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "提示词格式不正确")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(s.promptPath), 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, "保存提示词失败，请检查文件权限")
+		return
+	}
+	if err := os.WriteFile(s.promptPath, []byte(in.Content), 0o644); err != nil {
+		writeErr(w, http.StatusInternalServerError, "保存提示词失败，请检查文件权限")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": "ok"})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
