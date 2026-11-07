@@ -33,6 +33,10 @@
 - Go 1.24+
 - Node.js 20+（仅构建前端时需要）
 
+### 安装
+
+从 [GitHub Releases](https://github.com/LinuxSuRen/phd-mailer/releases) 下载对应平台的二进制（支持 linux/darwin/windows 的 amd64 与 arm64），连同 `phd-mailer-web-dist.zip` 解压出的 `web/dist` 目录放到同一工作目录，即可运行。
+
 ### 构建与启动
 
 ```bash

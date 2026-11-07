@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and release binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web console
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          targets="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
+          for target in $targets; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            name="phd-mailer-${os}-${arch}"
+            [ "$os" = "windows" ] && name="${name}.exe"
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
+              go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+              -o "dist/${name}" ./cmd/server
+          done
+          # 前端产物随二进制一起分发，解压到程序工作目录即可被托管
+          cp -r web/dist dist/web-dist
+          (cd dist && zip -r phd-mailer-web-dist.zip web-dist && rm -rf web-dist)
+          ls -lh dist/
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/phd-mailer-*
+            dist/phd-mailer-web-dist.zip
+          generate_release_notes: true
