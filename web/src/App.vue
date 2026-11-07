@@ -167,7 +167,10 @@ onMounted(loadAll)
 <template>
   <div class="page">
     <header class="page-header">
-      <h1 class="page-header__title">phd-mailer · 博士套磁邮件发送台</h1>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <img src="/logo.svg" alt="phd-mailer logo" width="36" height="36" />
+        <h1 class="page-header__title">phd-mailer · 博士套磁邮件发送台</h1>
+      </div>
       <div style="display: flex; gap: 8px; align-items: center">
         <el-tag :type="config.dry_run ? 'warning' : 'danger'" effect="dark">
           {{ config.dry_run ? '演练模式' : '真实发送' }}
