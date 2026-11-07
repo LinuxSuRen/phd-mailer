@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- 背景圆角方块 -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#409eff"/>
+  <!-- 信封主体 -->
+  <rect x="24" y="58" width="80" height="44" rx="8" fill="#ffffff"/>
+  <path d="M28 64 L64 90 L100 64" fill="none" stroke="#409eff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 学士帽 -->
+  <path d="M64 18 L98 32 L64 46 L30 32 Z" fill="#ffffff"/>
+  <path d="M46 40 L46 54 Q64 62 82 54 L82 40" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <!-- 帽穗 -->
+  <line x1="92" y1="34" x2="92" y2="46" stroke="#ffd04c" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="92" cy="49" r="4" fill="#ffd04c"/>
+</svg>

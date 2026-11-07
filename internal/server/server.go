@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -58,15 +59,16 @@ type SendResult struct {
 
 // Server 应用状态。
 type Server struct {
-	mu       sync.Mutex
-	dataPath string
-	data     *DataFile
-	ledger   *ledger.Ledger
-	dryRun   bool
+	mu        sync.Mutex
+	dataPath  string
+	promptPath string
+	data      *DataFile
+	ledger    *ledger.Ledger
+	dryRun    bool
 }
 
-// New 加载数据文件并构建服务。
-func New(dataPath string, l *ledger.Ledger, dryRun bool) (*Server, error) {
+// New 加载数据文件并构建服务。promptPath 为 AI 提示词文件路径。
+func New(dataPath, promptPath string, l *ledger.Ledger, dryRun bool) (*Server, error) {
 	raw, err := os.ReadFile(dataPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取数据文件失败：%w", err)
@@ -80,7 +82,7 @@ func New(dataPath string, l *ledger.Ledger, dryRun bool) (*Server, error) {
 	}
 	d.SMTP.User = firstNonEmpty(d.SMTP.User, os.Getenv("PHD_MAILER_SMTP_USER"))
 	d.SMTP.AuthCode = firstNonEmpty(d.SMTP.AuthCode, os.Getenv("PHD_MAILER_SMTP_AUTH_CODE"))
-	return &Server{dataPath: dataPath, data: &d, ledger: l, dryRun: dryRun}, nil
+	return &Server{dataPath: dataPath, promptPath: promptPath, data: &d, ledger: l, dryRun: dryRun}, nil
 }
 
 // Routes 注册全部 API（前缀 /api）。
@@ -89,6 +91,10 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config", s.handlePutConfig)
 	mux.HandleFunc("POST /api/send", s.handleSend)
+	mux.HandleFunc("POST /api/contacts/import", s.handleImportContacts)
+	mux.HandleFunc("GET /api/data/export", s.handleExportData)
+	mux.HandleFunc("GET /api/prompt", s.handleGetPrompt)
+	mux.HandleFunc("PUT /api/prompt", s.handlePutPrompt)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
@@ -248,6 +254,118 @@ func (s *Server) persistLocked() error {
 		return err
 	}
 	return os.WriteFile(s.dataPath, raw, 0o600)
+}
+
+// importRequest 导入请求：content 为用户粘贴或从文件读取的 YAML 文本。
+type importRequest struct {
+	Content string `json:"content"`
+}
+
+// handleImportContacts 支持两种导入内容：
+//  1. 完整数据文件（含 version/sender/smtp/contacts），整体替换；
+//  2. 仅 contacts 列表（AI 生成物的典型输出），替换联系人但保留现有 sender/smtp/defaults。
+func (s *Server) handleImportContacts(w http.ResponseWriter, r *http.Request) {
+	var req importRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求格式不正确")
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		writeErr(w, http.StatusBadRequest, "导入内容为空")
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var full DataFile
+	var contacts []Contact
+	if err := yaml.Unmarshal([]byte(req.Content), &full); err == nil && len(full.Contacts) > 0 {
+		contacts = full.Contacts
+		// 完整文件导入：SMTP 凭证为空时保留现有配置，避免导入覆盖掉已配置的授权码
+		if full.SMTP.User == "" || full.SMTP.AuthCode == "" {
+			full.SMTP = s.data.SMTP
+		}
+	} else if err := yaml.Unmarshal([]byte(req.Content), &struct {
+		Contacts *[]Contact `yaml:"contacts"`
+	}{Contacts: &contacts}); err != nil || len(contacts) == 0 {
+		writeErr(w, http.StatusBadRequest, "无法识别导入内容：需要完整数据文件或 contacts 列表")
+		return
+	}
+
+	// 基础校验：id 唯一且邮箱完整
+	seen := map[string]bool{}
+	for _, c := range contacts {
+		if c.ID == "" || c.Email == "" || c.Subject == "" || c.Body == "" {
+			writeErr(w, http.StatusBadRequest, "联系人字段不完整（需要 id、email、subject、body）")
+			return
+		}
+		if seen[c.ID] {
+			writeErr(w, http.StatusBadRequest, "联系人 id 重复："+c.ID)
+			return
+		}
+		seen[c.ID] = true
+	}
+
+	if len(full.Contacts) > 0 {
+		full.Defaults = s.data.Defaults
+		if full.Sender.Name == "" {
+			full.Sender = s.data.Sender
+		}
+		s.data = &full
+	} else {
+		s.data.Contacts = contacts
+	}
+	if err := s.persistLocked(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "写入数据文件失败，请检查文件权限")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]int{"contacts": len(s.data.Contacts)}})
+}
+
+// handleExportData 导出当前完整数据文件内容，便于用户备份或迁移。
+func (s *Server) handleExportData(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, err := yaml.Marshal(s.data)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "导出失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]string{"content": string(raw)}})
+}
+
+// handleGetPrompt 返回 AI 提示词文件内容（文件不存在时返回空内容）。
+func (s *Server) handleGetPrompt(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	content := ""
+	if raw, err := os.ReadFile(s.promptPath); err == nil {
+		content = string(raw)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"content": content}})
+}
+
+// handlePutPrompt 保存用户修改后的 AI 提示词。
+func (s *Server) handlePutPrompt(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "提示词格式不正确")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(s.promptPath), 0o755); err != nil {
+		writeErr(w, http.StatusInternalServerError, "保存提示词失败，请检查文件权限")
+		return
+	}
+	if err := os.WriteFile(s.promptPath, []byte(in.Content), 0o644); err != nil {
+		writeErr(w, http.StatusInternalServerError, "保存提示词失败，请检查文件权限")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": "ok"})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

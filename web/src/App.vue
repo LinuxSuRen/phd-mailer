@@ -8,6 +8,10 @@ import {
   getConfig,
   updateConfig,
   sendEmails,
+  getPrompt,
+  savePrompt,
+  importContacts,
+  exportData,
 } from './api'
 
 const contacts = ref([])
@@ -25,6 +29,63 @@ const config = reactive({
 })
 const configDialogVisible = ref(false)
 const configForm = reactive({ smtp_user: '', smtp_auth_code: '', interval_seconds: 60 })
+const promptDialogVisible = ref(false)
+const promptContent = ref('')
+const promptSaved = ref('')
+const importDialogVisible = ref(false)
+const importContent = ref('')
+
+async function openImport() {
+  importContent.value = ''
+  importDialogVisible.value = true
+}
+
+function onImportFileChange(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  file.text().then((text) => {
+    importContent.value = text
+  })
+}
+
+async function confirmImport() {
+  if (!importContent.value.trim()) {
+    ElMessage.warning('请先粘贴 YAML 内容或选择文件')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '导入将替换当前全部联系人（发送台账不受影响，已发送记录仍会去重）。',
+      '确认导入',
+      { confirmButtonText: '替换导入', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const result = await importContacts(importContent.value)
+    ElMessage.success(`导入成功，共 ${result?.contacts ?? 0} 位联系人`)
+    importDialogVisible.value = false
+    await loadAll()
+  } catch (err) {
+    showError(err)
+  }
+}
+
+async function downloadExport() {
+  try {
+    const data = await exportData()
+    const blob = new Blob([data?.content || ''], { type: 'text/yaml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'emails.yaml'
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    showError(err)
+  }
+}
 
 const statusText = {
   sent: '已发送',
@@ -126,17 +187,53 @@ async function handleSend() {
   }
 }
 
+async function openPrompt() {
+  try {
+    const data = await getPrompt()
+    promptContent.value = data?.content || ''
+    promptSaved.value = promptContent.value
+    promptDialogVisible.value = true
+  } catch (err) {
+    showError(err)
+  }
+}
+
+async function savePromptContent() {
+  try {
+    await savePrompt(promptContent.value)
+    promptSaved.value = promptContent.value
+    ElMessage.success('提示词已保存')
+  } catch (err) {
+    showError(err)
+  }
+}
+
+async function copyPrompt() {
+  try {
+    await navigator.clipboard.writeText(promptContent.value)
+    ElMessage.success('提示词已复制到剪贴板')
+  } catch {
+    ElMessage.warning('复制失败，请在文本框中手动全选复制')
+  }
+}
+
 onMounted(loadAll)
 </script>
 
 <template>
   <div class="page">
     <header class="page-header">
-      <h1 class="page-header__title">phd-mailer · 博士套磁邮件发送台</h1>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <img src="/logo.svg" alt="phd-mailer logo" width="36" height="36" />
+        <h1 class="page-header__title">phd-mailer · 博士套磁邮件发送台</h1>
+      </div>
       <div style="display: flex; gap: 8px; align-items: center">
         <el-tag :type="config.dry_run ? 'warning' : 'danger'" effect="dark">
           {{ config.dry_run ? '演练模式' : '真实发送' }}
         </el-tag>
+        <el-button @click="openImport">导入数据</el-button>
+        <el-button @click="downloadExport">导出</el-button>
+        <el-button @click="openPrompt">AI 提示词</el-button>
         <el-button @click="openConfig">SMTP 配置</el-button>
         <el-button
           type="primary"
@@ -214,6 +311,71 @@ onMounted(loadAll)
       共 {{ contacts.length }} 位导师，已发送
       {{ contacts.filter((c) => c.sent).length }} 位。同一导师（含同一邮箱）永远只会收到一封邮件。
     </p>
+
+    <el-dialog
+      v-model="importDialogVisible"
+      title="导入联系人数据"
+      width="720px"
+      top="6vh"
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+        title="支持两种内容：完整数据文件，或 AI 生成的 contacts 列表；SMTP 配置与签名不会丢失"
+      />
+      <input
+        type="file"
+        accept=".yaml,.yml,.txt"
+        style="margin-bottom: 8px"
+        @change="onImportFileChange"
+      />
+      <el-input
+        v-model="importContent"
+        type="textarea"
+        :rows="16"
+        placeholder="选择文件后自动填充，也可以直接把 YAML 粘贴到这里"
+        style="font-family: var(--font-mono); font-size: 13px"
+      />
+      <template #footer>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmImport">替换导入</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="promptDialogVisible"
+      title="AI 提示词（可编辑，保存后长期生效）"
+      width="720px"
+      top="6vh"
+    >
+      <el-input
+        v-model="promptContent"
+        type="textarea"
+        :rows="20"
+        placeholder="加载中…"
+        style="font-family: var(--font-mono); font-size: 13px"
+      />
+      <p class="text-dim" style="margin: 8px 0 0">
+        拷贝给任意 AI 助手，替换【】中的个人信息，即可批量生成符合 data/emails.yaml 格式的套磁邮件。
+      </p>
+      <template #footer>
+        <el-button
+          v-if="promptContent !== promptSaved"
+          type="warning"
+          size="small"
+          style="float: left"
+          @click="promptContent = promptSaved"
+        >
+          放弃修改
+        </el-button>
+        <el-button @click="promptDialogVisible = false">关闭</el-button>
+        <el-button :disabled="promptContent === promptSaved" @click="savePromptContent">
+          保存
+        </el-button>
+        <el-button type="primary" @click="copyPrompt">复制全文</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="configDialogVisible" title="SMTP 配置（腾讯 QQ 邮箱）" width="480px">
       <el-form label-width="120px">
